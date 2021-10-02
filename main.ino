@@ -408,7 +408,7 @@ void handleRoot() {
     <style>button {width:100%;padding:10px;border-radius:6px;font-size:18px;font-weight:400;color:#fff;background-color:#337ab7;border:1px solid transparent;border-color:#2e6da4;text-align:center;touch-action:manipulation;cursor:pointer;box-shadow: 2px 2px 7px #888;}</style>\n \
     <body>\n \
     <button class='btn btn-block btn-lg btn-primary' id='winbtn'></button><br><br>\n \
-    <div style='font-size:26px;width:100%;padding:20px;text-align:center;'>" + hour() + ":" + padding + minute() + "</div><br>\n \
+    <div style='font-size:26px;width:100%;padding-top:20px;padding-bottom:20px;text-align:center;'>" + hour() + ":" + padding + minute() + "</div><br>\n \
     <button class='btn btn-block btn-lg btn-primary' id='autobtn'></button><br><br>\n \
     <button class='btn btn-block btn-lg btn-primary' id='daysavebtn'></button><br><br>\n \
     <div style='font-size:14px;width:100%;text-align:center;'><br>" + hostname + " (wifi " + String(WiFi.RSSI()) + "dB)</div>\n \
