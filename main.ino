@@ -5,6 +5,7 @@
 #include <WiFiUdp.h>
 #include <TimeLib.h> 
 #include <TimeAlarms.h>
+#include <EEPROM.h>
 
 
 // -------------------------------------------------------------------
@@ -23,21 +24,23 @@
   and issue a quadruple click and reboot.
 
 */
-// -------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------------------------
 
 
 
 // EDIT YOUR INFO HERE
 
-const int timeZone = 1;             // Sweden Summer 2, Winter 1
 
-const char* ssid = "xxxxxx";
-const char* password = "xxxxxxxxxxxxx";
+int timezone = 1;
+
+const char* ssid = "xxxxxxxxx";
+const char* password = "xxxxxxxxxxx";
 const char* hostname = "sovrumsfonster";
 
 const char* ota_path = "/firmware";
-const char* ota_username = "update";
-const char* ota_password = "go";
+const char* ota_username = "xxxxxxxx";
+const char* ota_password = "xxxxxxxx";
 
 const char* mqttserver = "homeautomation";
 const char* mqttpubtopic = "stan/fonster/sovrum"; 
@@ -55,37 +58,11 @@ const float windowAngleComp = 1.5;  // ADJUST SO THE angleOpen/centimeters SHOWN
 
 
 
-// -------------------------------------------------------------------
-
-// EDIT YOUR SCHEDULES HERE
-
-void mySchedules(void) {
-  Alarm.alarmRepeat(6,10,0, morningClose);
-  Alarm.alarmRepeat(22,00,0, eveningOpen);
-}
 
 
+// ---------------------------------------------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------------------------
 
-void morningClose(void){
-//  windowOpenTocm(2); 
-  windowClose();
-}
-
-void eveningOpen(void){
-  windowOpenTocm(13);
-}
-
-
-
-// -------------------------------------------------------------------
-
-
-#ifdef SVENSKA
-String languagestrings = "var webpagemessages = ['&Ouml;ppna/st&auml;ng sovrumsf&ouml;nster', 'F&ouml;nstret &auml;r st&auml;ngt', 'F&ouml;nstret &auml;r &ouml;ppet ca ', '&Ouml;ppnar f&ouml;nstret, tryck igen f&ouml;r att stanna', 'St&auml;nger f&ouml;nstret, tryck igen f&ouml;r att stanna']";
-#endif
-#ifdef ENGLISH
-String languagestrings = "var webpagemessages = ['Open/Close window', 'The window is closed', 'The window is open ca ', 'Opening window, click again to stop', 'Closing window, click again to stop']";
-#endif
 
 
 
@@ -114,6 +91,53 @@ int openAngle = 0;
 #define MQTTBUFFSIZE 200
 char mqttbuff[MQTTBUFFSIZE];
 
+#define EEPROMAUTOADDR 0
+#define EEPROMDAYSAVEADDR 1
+byte enableAutomation;
+byte daylightSaving;
+
+#ifdef SVENSKA
+String languagestrings = "var webpagemessages = ['&Ouml;ppna/st&auml;ng f&ouml;nster', 'F&ouml;nstret &auml;r st&auml;ngt', 'F&ouml;nstret &auml;r &ouml;ppet ca ', '&Ouml;ppnar f&ouml;nstret, tryck igen f&ouml;r att stanna', 'St&auml;nger f&ouml;nstret, tryck igen f&ouml;r att stanna', 'Automation', 'Sommartid']";
+String stringsonoroff = "var stronoroff = ['Av', 'P&aring;']";
+#endif
+#ifdef ENGLISH
+String languagestrings = "var webpagemessages = ['Open/Close window', 'The window is closed', 'The window is open ca ', 'Opening window, click again to stop', 'Closing window, click again to stop', 'Automation', 'Daylight Savings']";
+String stringsonoroff = "var stronoroff = ['Off', 'On']";
+#endif
+
+
+
+
+
+
+// ---------------------------------------------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------------------------
+
+// EDIT YOUR SCHEDULES HERE
+
+void mySchedules(void) {
+  Alarm.alarmRepeat(6,10,0, morningClose);
+  Alarm.alarmRepeat(22,00,0, eveningOpen);
+}
+
+
+
+void morningClose(void){
+  if(enableAutomation) {
+    //  windowOpenTocm(2); 
+    windowClose();
+  }
+}
+
+void eveningOpen(void){
+  if(enableAutomation) {
+    windowOpenTocm(13);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------------------------
+
 
 
 
@@ -125,6 +149,8 @@ char mqttbuff[MQTTBUFFSIZE];
 void setup(void) {  
   
   Serial.begin(115200);
+  delay(250);
+  Serial.println("\nBooting...");
   
   pinMode(OPEN, OUTPUT);
   digitalWrite(OPEN, HIGH);
@@ -150,8 +176,20 @@ void setup(void) {
   Serial.print("Webserver started at http://");
   Serial.println(WiFi.localIP());
 
+  EEPROM.begin(512);
+  enableAutomation = EEPROM.read(EEPROMAUTOADDR);
+  daylightSaving = EEPROM.read(EEPROMDAYSAVEADDR);
+  if (EEPROM.read(EEPROMAUTOADDR) > 1) {  // IF EEPROM NEVER INITILZED
+    enableAutomation = 0;
+  }
+  if (EEPROM.read(EEPROMDAYSAVEADDR) > 1) {
+    daylightSaving = 0;
+  }
+
   server.on("/", handleRoot);
-  server.on("/button", handleREST);
+  server.on("/button", handleRESTbutton);
+  server.on("/toggleauto", handleRESTtoggleauto);
+  server.on("/daysave", handleRESTdaysave);
   server.begin();
   httpUpdater.setup(&server, ota_path, ota_username, ota_password);
 
@@ -168,7 +206,7 @@ void setup(void) {
     setSyncProvider(getNtpTime);
     delay(8000);
   }
-  Serial.print("done! ");
+  Serial.print("done: ");
   digitalClockDisplay();
   
   
@@ -191,8 +229,8 @@ void loop() {
   static bool prevbutton = false;
   bool button = digitalRead(BUTTON);
   
-  static unsigned long timer1 = 20;
-  if (now - timer1 >= 20) {
+  static unsigned long timer1 = 100;
+  if (now - timer1 >= 100) {
     timer1 = now;
     if (button && !prevbutton) {
       buttonAction();
@@ -354,21 +392,54 @@ void windowOpenTocm (int centimeters) {
 // THE BUTTON'S TEXT WILL SHOW STATUS OF WINDOW
 
 void handleRoot() {
+  
+  String padding = "";
+  if (minute()<10) {
+    padding = "0";
+  }
+  
+
   String webpage = "<html><head><title>" + String(hostname) + "</title></head>\n \
     <script>" + languagestrings + "</script>\n \ 
+    <script>" + stringsonoroff + "</script>\n \ 
     <script src='https://code.jquery.com/jquery-2.1.3.min.js'></script>\n \
     <script type='text/javascript' src='https://cdn.rawgit.com/Foliotek/AjaxQ/master/ajaxq.js'></script>\n \
-    <style>body {width:700px;} button {margin:20px;padding:10px;width:100%;border-radius:6px;font-size:18px;font-weight:400;color:#fff;background-color:#337ab7;border:1px solid transparent;border-color:#2e6da4;text-align:center;touch-action:manipulation;cursor:pointer;box-shadow: 2px 2px 7px #888;}</style>\n \
-    <body><button class='btn btn-block btn-lg btn-primary' id='winbtn'></button><br><br><center>\n" + hour() + ":" + minute() + "</center>\n \
-    <script>$(document).ready(function() {$('button#winbtn').html(webpagemessages[0]); $('#winbtn').click(function() {$.getq('queue', 'http://" + (WiFi.localIP()).toString() + ":80/button', onsuccess);\n \
+    <style>body {width:700px;margin:20px;font-family:sans-serif;font-size:18px;font-weight:400;color:#444;}</style>\n \
+    <style>button {width:100%;padding:10px;border-radius:6px;font-size:18px;font-weight:400;color:#fff;background-color:#337ab7;border:1px solid transparent;border-color:#2e6da4;text-align:center;touch-action:manipulation;cursor:pointer;box-shadow: 2px 2px 7px #888;}</style>\n \
+    <body>\n \
+    <button class='btn btn-block btn-lg btn-primary' id='winbtn'></button><br><br>\n \
+    <div style='font-size:26px;width:100%;padding:20px;text-align:center;'>" + hour() + ":" + padding + minute() + "</div><br>\n \
+    <button class='btn btn-block btn-lg btn-primary' id='autobtn'></button><br><br>\n \
+    <button class='btn btn-block btn-lg btn-primary' id='daysavebtn'></button><br><br>\n \
+    <div style='font-size:14px;width:100%;text-align:center;'><br>" + hostname + " (wifi " + String(WiFi.RSSI()) + "dB)</div>\n \
+    <script>\n \
+      $(document).ready(function() {\n \
+        $('button#winbtn').html(webpagemessages[0]);\n \
+        $('button#autobtn').html(webpagemessages[5] + ' ' + stronoroff[" +  String(enableAutomation) + "]);\n \
+        $('button#daysavebtn').html(webpagemessages[6] + ' ' + stronoroff[" +  String(daylightSaving) + "]);\n \
+        $('#winbtn').click(function() {$.getq('queue', 'http://" + (WiFi.localIP()).toString() + ":80/button', onsuccess);\n \
           function onsuccess (result) {\n \
-            message = result.return_value;  // ON ERROR SHOW RAW DATA \n \
+            message = result.return_value;\n \
             if (result.return_value%10 == 0) {\n \
               if (result.return_value/10 == 0) { message = webpagemessages[1];}\n \
-              else {message = webpagemessages[2] + Math.round(((result.return_value)/10000)+0.5) + \" cm\";}}\n \
+              else {message = webpagemessages[2] + Math.round(((result.return_value)/10000)+0.5) + \" cm\";}\n \
+            }\n \
             if (result.return_value%10 == 1) { message = webpagemessages[3];}\n \
             if (result.return_value%10 == 2) { message = webpagemessages[4];}\n \
-            $('button#winbtn').html(message);}});});</script>\n \
+            $('button#winbtn').html(message);\n \
+        }});\n \
+        $('#autobtn').click(function() {$.getq('queue', 'http://" + (WiFi.localIP()).toString() + ":80/toggleauto', onsuccess);\n \
+          function onsuccess (result) {\n \
+            $('button#autobtn').html(webpagemessages[5] + ' ' + stronoroff[result.return_value]);\n \
+          }\n \
+        });\n \
+        $('#daysavebtn').click(function() {$.getq('queue', 'http://" + (WiFi.localIP()).toString() + ":80/daysave', onsuccess);\n \
+          function onsuccess (result) {\n \
+            $('button#daysavebtn').html(webpagemessages[6] + ' ' + stronoroff[result.return_value]);\n \
+          }\n \
+        });\n \
+      });\n \
+    </script>\n \
     </body></html>";
   server.send(200, "text/html", webpage);
 }
@@ -377,16 +448,49 @@ void handleRoot() {
 
 
 // -------------------------------------------------------------------
-// HANDLE WEB REST CALL
+// HANDLE WEB REST CALLS
 
-void handleREST() {
-  Serial.print("REST");
+void handleRESTbutton() {
+  Serial.println("handleRESTbutton");
   int restdata = buttonAction();
   String reststring = "{\"return_value\": " + String(restdata) + ", \"name\": \"" + String(hostname) + "\"}";
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.send(200, "application/json", reststring);
+  Serial.println(reststring);
 }
 
+
+void handleRESTtoggleauto() {
+  Serial.print("handleRESTtoggleauto. Value saved in EEPROM: ");
+  if (enableAutomation==0) { enableAutomation = 1; }
+  else { enableAutomation = 0; }
+  EEPROM.write(EEPROMAUTOADDR, enableAutomation);
+  EEPROM.commit();
+  Serial.println(EEPROM.read(EEPROMAUTOADDR));
+  String reststring = "{\"return_value\": " + String(enableAutomation) + ", \"name\": \"" + String(hostname) + "\"}";
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", reststring);
+  Serial.println(reststring);
+}
+
+
+void handleRESTdaysave() {
+  Serial.print("handleRESTdaysave. Value saved in EEPROM: ");
+  if (daylightSaving==0) { daylightSaving = 1; }
+  else { daylightSaving = 0; }
+  EEPROM.write(EEPROMDAYSAVEADDR, daylightSaving);
+  EEPROM.commit();
+  Serial.println(EEPROM.read(EEPROMDAYSAVEADDR));
+  String reststring = "{\"return_value\": " + String(daylightSaving) + ", \"name\": \"" + String(hostname) + "\"}";
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", reststring);
+  Serial.println(reststring);
+
+  Serial.print("Setting NTP... ");
+  setSyncProvider(getNtpTime);
+  getNtpTime();
+  Serial.println("done!");
+}
 
 
 // -------------------------------------------------------------------
@@ -513,7 +617,7 @@ time_t getNtpTime()
       secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
       secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
       secsSince1900 |= (unsigned long)packetBuffer[43];
-      return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
+      return secsSince1900 - 2208988800UL + ((daylightSaving+timezone) * SECS_PER_HOUR);
     }
   }
   if (NTPVERBOSE) {
