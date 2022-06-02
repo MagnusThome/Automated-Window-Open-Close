@@ -223,15 +223,15 @@ void setup(void) {
 
 void loop() {
 
+  static bool prevbutton = false;
+  bool button;
   unsigned long now = millis();
 
-
-  static bool prevbutton = false;
-  bool button = digitalRead(BUTTON);
   
   static unsigned long timer1 = 100;
   if (now - timer1 >= 100) {
     timer1 = now;
+    button = digitalRead(BUTTON);
     if (button && !prevbutton) {
       buttonAction();
     }
@@ -239,11 +239,15 @@ void loop() {
   }
 
 
-  if (!mqttclient.connected()) {
-    mqttConnect();
+  static unsigned long timer2 = 1000;
+  if (now - timer2 >= 1000) {
+    timer2 = now;
+    if (!mqttclient.connected()) {
+      mqttConnect();
+    }
+    mqttclient.loop();
   }
-  mqttclient.loop();
-
+  
   server.handleClient();
 
   Alarm.delay(0);
@@ -254,6 +258,7 @@ void loop() {
     Serial.print("TIMEOUT");
     windowStop();
   }
+
 }
 
 
@@ -400,8 +405,8 @@ void handleRoot() {
   
 
   String webpage = "<html><head><title>" + String(hostname) + "</title></head>\n \
-    <script>" + languagestrings + "</script>\n \ 
-    <script>" + stringsonoroff + "</script>\n \ 
+    <script>" + languagestrings + "</script>\n \
+    <script>" + stringsonoroff + "</script>\n \
     <script src='https://code.jquery.com/jquery-2.1.3.min.js'></script>\n \
     <script type='text/javascript' src='https://cdn.rawgit.com/Foliotek/AjaxQ/master/ajaxq.js'></script>\n \
     <style>body {width:700px;margin:20px;font-family:sans-serif;font-size:18px;font-weight:400;color:#444;}</style>\n \
